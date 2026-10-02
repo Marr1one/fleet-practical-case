@@ -5,16 +5,23 @@ const DEFAULT_EMPLOYEE_FORM = { name: "", role: "" };
 const DEFAULT_DEVICE_FORM = { name: "", type: "Laptop", ownerId: "" };
 
 function App() {
+  const [cart, setCart] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [placingOrder, setPlacingOrder] = useState(false);
   const [activeTab, setActiveTab] = useState("employees");
   const [employees, setEmployees] = useState([]);
   const [devices, setDevices] = useState([]);
+  const [catalog, setCatalog] = useState([]);
   const [filteredEmployees, setFilteredEmployees] = useState([]);
   const [filteredDevices, setFilteredDevices] = useState([]);
   const [roleFilter, setRoleFilter] = useState("");
   const [deviceTypeFilter, setDeviceTypeFilter] = useState("");
+  const [catalogCategoryFilter, setCatalogCategoryFilter] = useState("");
   const [deviceOwnerFilter, setDeviceOwnerFilter] = useState("");
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [deviceSearch, setDeviceSearch] = useState("");
+  const [catalogSearch, setCatalogSearch] = useState("");
   const [employeeForm, setEmployeeForm] = useState(DEFAULT_EMPLOYEE_FORM);
   const [deviceForm, setDeviceForm] = useState(DEFAULT_DEVICE_FORM);
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
@@ -23,6 +30,7 @@ function App() {
   const [errors, setErrors] = useState([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(false);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [dashboardState, setDashboardState] = useState({
     totalEmployees: 0,
     totalDevices: 0,
@@ -100,6 +108,7 @@ function App() {
   useEffect(() => {
     fetchEmployees();
     fetchDevices();
+    fetchCatalog();
   }, []);
 
   useEffect(() => {
@@ -226,6 +235,60 @@ function App() {
     });
   }, [employees, devices]);
 
+  const cartLines = useMemo(() => {
+    const lines = [];
+
+    cart.forEach((line) => {
+      const product = catalog.find((product) => product.id === line.productId);
+
+      if (product) {
+        lines.push({
+          productId: line.productId,
+          quantity: line.quantity,
+          name: product.name,
+          price: product.price,
+        });
+      }
+    });
+
+    return lines;
+  }, [cart, catalog]);
+
+  const cartTotal = useMemo(() => {
+    let total = 0;
+    for(const line in cartLines)
+      total += line.quantity * line.price;
+    return total;
+  },[cartLines]);
+
+  const cartCount = useMemo(() => {
+    let count = 0;
+    for(const line in cartLines)
+      count += line.quantity;
+    return count;
+  },[cartLines]);
+
+  function addToCart(productId) {
+    setCart((prev) => {
+      const existing = prev.find((line) => line.productId === productId);
+      if (existing) {
+        return prev.map((line) => line.productId === productId ? { ...line, quantity: line.quantity + 1 } : line);
+      }
+      return [...prev, { productId, quantity: 1 }];
+    });
+  }
+
+  function removeFromCart(productId) {
+    setCart((prev) => prev.filter((line) => line.productId !== productId));
+  }
+
+  function updateCartQuantity(productId, quantity) {
+    if (!Number.isInteger(quantity) || quantity < 1){
+      return;
+    }
+    setCart((prev) => prev.map((line) => line.productId === productId ? { ...line, quantity } : line));
+  }
+
   useEffect(() => {
     if (!statusMessage) {
       return undefined;
@@ -255,6 +318,24 @@ function App() {
     }
   }
 
+
+
+  async function fetchCatalog() {
+    try {
+      const response = await fetch("/api/catalog");
+      const json = await response.json();
+      if (!response.ok){
+        throw new Error(json.message || "Couldn't load catalog");
+      }
+      setCatalog(Array.isArray(json) ? json : [])
+      
+    } catch (error) {
+      setErrors((prev) => [...prev, `Catalog fetch failed: ${error.message}`]);
+    } finally{
+      setLoadingCatalog(false);
+    }
+  }
+
   async function fetchDevices() {
     setLoadingDevices(true);
     try {
@@ -271,6 +352,31 @@ function App() {
       setLoadingDevices(false);
     }
   }
+
+  const catalogCategories = useMemo(
+    () => [...new Set(catalog.map((product) => product.category))],
+    [catalog]
+  );
+
+  const filteredCatalog = useMemo(() => {
+    let result = catalog;
+    if (catalogCategoryFilter) {
+      result = result.filter(
+        (product) => product.category === catalogCategoryFilter
+      );
+    }
+
+    const query = catalogSearch.trim().toLowerCase();
+    if (query) {
+      result = result.filter(
+        (product) =>
+          product.name.toLowerCase().includes(query) ||
+          product.category.toLowerCase().includes(query)
+      );
+    }
+
+    return result;
+  }, [catalog, catalogCategoryFilter, catalogSearch]);
 
   async function submitEmployee(event) {
     event.preventDefault();
@@ -462,10 +568,20 @@ function App() {
           Devices
         </button>
         <button
+          className={
+            activeTab === "catalog" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("catalog")}
+          type="button"
+        >
+          Catalog
+        </button>
+        <button
           type="button"
           onClick={() => {
             fetchEmployees();
             fetchDevices();
+            fetchCatalog();
           }}
         >
           Manual refresh
@@ -758,9 +874,67 @@ function App() {
             </table>
           </section>
         ) : null}
+      {activeTab === "catalog" ? (
+        <section className="panel">
+          <h2>Catalog</h2>
+
+          <h3>Filters</h3>
+          <div className="filters">
+            <label>
+              Category
+              <select
+                value={catalogCategoryFilter}
+                onChange={(event) => setCatalogCategoryFilter(event.target.value)}
+              >
+                <option value="">All</option>
+                {catalogCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Search
+              <input
+                value={catalogSearch}
+                onChange={(event) => setCatalogSearch(event.target.value)}
+                placeholder="Search name / category"
+              />
+            </label>
+          </div>
+
+          <h3>Product list {loadingCatalog ? "(loading...)" : ""}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCatalog.map((product) => (
+                <tr key={product.id}>
+                  <td>{product.name}</td>
+                  <td>{product.category}</td>
+                  <td>{product.price} €</td>
+                  <td>{product.description}</td>
+                </tr>
+              ))}
+              {filteredCatalog.length === 0 ? (
+                <tr>
+                  <td colSpan="4">No products found</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
       </main>
     </div>
   );
-}
+  }
 
-export default App;
+  export default App;

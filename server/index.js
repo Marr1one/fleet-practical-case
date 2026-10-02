@@ -18,6 +18,61 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+const SEED_PRODUCTS = [
+  { name: 'MacBook Pro 14"', category: "Laptop", price: 1999, description: "Puce M-series Pro, écran Liquid Retina XDR" },
+  { name: 'MacBook Air 13"', category: "Laptop", price: 1199, description: "Fin, léger, jusqu'à 18 h d'autonomie" },
+  { name: 'iMac 24"', category: "Desktop", price: 1499, description: "Écran Retina 4.5K intégré, tout-en-un" },
+  { name: "Mac mini", category: "Desktop", price: 699, description: "Mac de bureau compact, sans écran" },
+  { name: "Mac Studio", category: "Desktop", price: 2199, description: "Mac de bureau haute performance" },
+  { name: "Magic Keyboard", category: "Keyboard", price: 129, description: "Clavier sans fil rechargeable, Touch ID" },
+  { name: "Magic Mouse", category: "Mouse", price: 85, description: "Souris sans fil à surface Multi-Touch" },
+  { name: "AirPods Max", category: "Headset", price: 579, description: "Casque à réduction de bruit active" },
+];
+
+db.serialize(() => {
+  db.run(`
+  CREATE TABLE IF NOT EXISTS catalog_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    total REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS catalog_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      unit_price REAL NOT NULL,
+      quantity INTEGER NOT NULL,
+      FOREIGN KEY (order_id) REFERENCES catalog_orders(id)
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS catalog_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      price REAL NOT NULL,
+      description TEXT
+    )
+  `);
+
+  db.get("SELECT COUNT(*) AS count FROM catalog_items", (err, row) => {
+    if (err) return console.error("Catalog count failed:", err.message);
+    if (row.count > 0) return; 
+
+    const stmt = db.prepare(
+      "INSERT INTO catalog_items (name, category, price, description) VALUES (?, ?, ?, ?)"
+    );
+    SEED_PRODUCTS.forEach((p) =>
+      stmt.run(p.name, p.category, p.price, p.description)
+    );
+    stmt.finalize();
+  });
+});
+
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS employees (
@@ -83,6 +138,19 @@ app.get("/api/employees", (req, res) => {
   });
 });
 
+app.get("/api/catalog", (req, res) => {
+  db.all(
+    "SELECT id, name, category, price, description FROM catalog_items ORDER BY category, name",
+    (err, rows) => {
+      if (err) {
+        console.error("Catalog error:", err.message);
+        return res.status(500).json({ message: "Could not load catalog" });
+      }
+      res.json(rows);
+    }
+  );
+});
+
 app.get("/api/employees/:id", (req, res) => {
   const employeeId = Number(req.params.id);
   if (!employeeId) {
@@ -104,6 +172,74 @@ app.get("/api/employees/:id", (req, res) => {
       return res.json(row);
     },
   );
+});
+
+app.get("/api/orders", (req, res) => {
+  db.all("SELECT * FROM catalog_orders ORDER BY id DESC", (err, orders) => {
+    if (err) {
+      console.error("Orders error:", err.message);
+      return res.status(500).json({ message: "Could not load orders" });
+    }
+
+    db.all("SELECT * FROM catalog_order_items", (err, items) => {
+      if (err) {
+        console.error("Order items error:", err.message);
+        return res.status(500).json({ message: "Could not load orders" });
+      }
+
+      const result = orders.map((order) => ({
+        ...order,
+        items: items.filter((item) => item.order_id === order.id),
+      }));
+
+      res.json(result);
+    });
+  });
+});
+
+app.post("/api/orders", (req, res) => {
+  const items = (req.body || {}).items;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "Cart is empty" });
+  }
+
+  db.all("SELECT id, name, price FROM catalog_items", (err, products) => {
+    if (err) {
+      return res.status(500).json({ message: "Could not create order" });
+    }
+
+    const lines = [];
+    let total = 0;
+
+    for (const item of items) {
+      const product = products.find((p) => p.id === Number(item.productId));
+      const quantity = Number(item.quantity);
+
+      if (!product || !Number.isInteger(quantity) || quantity < 1) {
+        return res.status(400).json({ message: "Invalid product or quantity" });
+      }
+      lines.push({ product, quantity });
+      total += product.price * quantity;
+    }
+
+    db.run("INSERT INTO catalog_orders (total) VALUES (?)", [total], function (err) {
+      if (err) {
+        return res.status(500).json({ message: "Could not create order" });
+      }
+      const orderId = this.lastID;
+
+      // On crée chaque ligne de la commande
+      for (const line of lines) {
+        db.run(
+          "INSERT INTO catalog_order_items (order_id, product_id, name, unit_price, quantity) VALUES (?, ?, ?, ?, ?)",
+          [orderId, line.product.id, line.product.name, line.product.price, line.quantity]
+        );
+      }
+
+      res.status(201).json({ id: orderId, total });
+    });
+  });
 });
 
 app.post("/api/employees", (req, res) => {
