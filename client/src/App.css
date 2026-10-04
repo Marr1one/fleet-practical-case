@@ -148,6 +148,19 @@ table {
   border-collapse: collapse;
 }
 
+.catalog-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .catalog-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 th,
 td {
   border: 1px solid #d4dde8;

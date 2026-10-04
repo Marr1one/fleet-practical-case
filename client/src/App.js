@@ -81,9 +81,9 @@ function App() {
       setDeviceOwnerFilter(savedOwnerFilter);
     }
 
-    if (hash === "employees" || hash === "devices") {
+    if (hash === "employees" || hash === "devices" || hash === "catalog" || hash === "orders") {
       setActiveTab(hash);
-    } else if (savedTab === "employees" || savedTab === "devices") {
+    } else if (savedTab === "employees" || savedTab === "devices" || savedTab === "catalog" || savedTab === "orders") {
       setActiveTab(savedTab);
     }
   }, []);
@@ -109,6 +109,7 @@ function App() {
     fetchEmployees();
     fetchDevices();
     fetchCatalog();
+    fetchOrders();
   }, []);
 
   useEffect(() => {
@@ -256,14 +257,14 @@ function App() {
 
   const cartTotal = useMemo(() => {
     let total = 0;
-    for(const line in cartLines)
+    for(const line of cartLines)
       total += line.quantity * line.price;
     return total;
   },[cartLines]);
 
   const cartCount = useMemo(() => {
     let count = 0;
-    for(const line in cartLines)
+    for(const line of cartLines)
       count += line.quantity;
     return count;
   },[cartLines]);
@@ -334,6 +335,45 @@ function App() {
     } finally{
       setLoadingCatalog(false);
     }
+  }
+
+    async function fetchOrders(){
+      try {
+        setLoadingOrders(true);
+        const response = await fetch("api/orders");
+        const json = await response.json();
+        if (!response.ok)
+          throw new Error(json.message || "Could not load orders");
+        setOrders(Array.isArray(json) ? json : []);
+      } catch (error) {
+        setErrors((prev) => [...prev, `Orders fetch failed : ${error.message}`]);
+      }
+      finally{
+        setLoadingOrders(false);
+      }
+    }
+    async function submitOrder() {
+      if (cart.length === 0)
+        return;
+      setPlacingOrder(true);
+      try {
+          const response = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: cart }),
+        });
+        const json = await response.json();
+        if (!response.ok) {
+          throw new Error(json.message || "Could not create order");
+        }
+        setStatusMessage(`Order #${json.id} created`);
+        setCart([]);
+        await fetchOrders();
+      } catch (error) {
+        setErrors((prev) => [...prev, `Order failed: ${error.message}`]);
+      } finally {
+        setPlacingOrder(false);
+      }
   }
 
   async function fetchDevices() {
@@ -577,11 +617,19 @@ function App() {
           Catalog
         </button>
         <button
+          className={activeTab === "orders" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("orders")}
+          type="button"
+        >
+          Orders
+        </button>
+        <button
           type="button"
           onClick={() => {
             fetchEmployees();
             fetchDevices();
             fetchCatalog();
+            fetchOrders();
           }}
         >
           Manual refresh
@@ -875,6 +923,7 @@ function App() {
           </section>
         ) : null}
       {activeTab === "catalog" ? (
+      <div className="catalog-layout">
         <section className="panel">
           <h2>Catalog</h2>
 
@@ -912,6 +961,7 @@ function App() {
                 <th>Category</th>
                 <th>Price</th>
                 <th>Description</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -921,17 +971,125 @@ function App() {
                   <td>{product.category}</td>
                   <td>{product.price} €</td>
                   <td>{product.description}</td>
+                  <td>
+                    <button type="button" onClick={() => addToCart(product.id)}>
+                      Add
+                    </button>
+                  </td>
                 </tr>
               ))}
               {filteredCatalog.length === 0 ? (
                 <tr>
-                  <td colSpan="4">No products found</td>
+                  <td colSpan="5">No products found</td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </section>
-      ) : null}
+
+        <aside className="panel cart">
+          <h2>Cart ({cartCount})</h2>
+          {cartLines.length === 0 ? (
+            <p>Your cart is empty</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Subtotal</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cartLines.map((line) => (
+                  <tr key={line.productId}>
+                    <td>{line.name}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCartQuantity(line.productId, line.quantity - 1)
+                        }
+                        disabled={line.quantity <= 1}
+                      >
+                        -
+                      </button>{" "}
+                      {line.quantity}{" "}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCartQuantity(line.productId, line.quantity + 1)
+                        }
+                      >
+                        +
+                      </button>
+                    </td>
+                    <td>{(line.price * line.quantity).toFixed(2)} €</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => removeFromCart(line.productId)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p>
+            <strong>Total: {cartTotal.toFixed(2)} €</strong>
+          </p>
+          <button
+            type="button"
+            onClick={submitOrder}
+            disabled={cartLines.length === 0 || placingOrder}
+          >
+            {placingOrder ? "Creating order..." : "Create order"}
+          </button>
+        </aside>
+      </div>
+    ) : null}
+    {activeTab === "orders" ? (
+    <section className="panel">
+      <h2>Order history {loadingOrders ? "(loading...)" : ""}</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Date</th>
+            <th>Items</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map((order) => (
+            <tr key={order.id}>
+              <td>#{order.id}</td>
+              <td>{order.created_at}</td>
+              <td>
+                <ul>
+                  {order.items.map((item) => (
+                    <li key={item.product_id}>
+                      {item.quantity} × {item.name} ({item.unit_price} €)
+                    </li>
+                  ))}
+                </ul>
+              </td>
+              <td>{order.total.toFixed(2)} €</td>
+            </tr>
+          ))}
+          {orders.length === 0 ? (
+            <tr>
+              <td colSpan="4">No orders yet</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </section>
+  ) : null}
       </main>
     </div>
   );
