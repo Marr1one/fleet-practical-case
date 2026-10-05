@@ -19,14 +19,14 @@ const db = new sqlite3.Database(dbPath, (err) => {
 });
 
 const SEED_PRODUCTS = [
-  { name: 'MacBook Pro 14"', category: "Laptop", price: 1999, description: "Puce M-series Pro, écran Liquid Retina XDR" },
-  { name: 'MacBook Air 13"', category: "Laptop", price: 1199, description: "Fin, léger, jusqu'à 18 h d'autonomie" },
-  { name: 'iMac 24"', category: "Desktop", price: 1499, description: "Écran Retina 4.5K intégré, tout-en-un" },
-  { name: "Mac mini", category: "Desktop", price: 699, description: "Mac de bureau compact, sans écran" },
-  { name: "Mac Studio", category: "Desktop", price: 2199, description: "Mac de bureau haute performance" },
-  { name: "Magic Keyboard", category: "Keyboard", price: 129, description: "Clavier sans fil rechargeable, Touch ID" },
-  { name: "Magic Mouse", category: "Mouse", price: 85, description: "Souris sans fil à surface Multi-Touch" },
-  { name: "AirPods Max", category: "Headset", price: 579, description: "Casque à réduction de bruit active" },
+  { name: 'MacBook Pro 14"', category: "Laptop", price: 1999, description: "Powerful laptop for demanding work" },
+  { name: 'MacBook Air 13"', category: "Laptop", price: 1199, description: "Light laptop for everyday use" },
+  { name: 'iMac 24"', category: "Desktop", price: 1499, description: "Desktop with the screen built in" },
+  { name: "Mac mini", category: "Desktop", price: 699, description: "Small desktop, bring your own screen" },
+  { name: "Mac Studio", category: "Desktop", price: 2199, description: "Fast desktop for heavy tasks" },
+  { name: "Magic Keyboard", category: "Keyboard", price: 129, description: "Wireless keyboard" },
+  { name: "Magic Mouse", category: "Mouse", price: 85, description: "Wireless mouse" },
+  { name: "AirPods Max", category: "Headset", price: 579, description: "Headphones with noise cancelling" },
 ];
 
 db.serialize(() => {
