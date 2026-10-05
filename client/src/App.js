@@ -5,16 +5,23 @@ const DEFAULT_EMPLOYEE_FORM = { name: "", role: "" };
 const DEFAULT_DEVICE_FORM = { name: "", type: "Laptop", ownerId: "" };
 
 function App() {
+  const [cart, setCart] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [placingOrder, setPlacingOrder] = useState(false);
   const [activeTab, setActiveTab] = useState("employees");
   const [employees, setEmployees] = useState([]);
   const [devices, setDevices] = useState([]);
+  const [catalog, setCatalog] = useState([]);
   const [filteredEmployees, setFilteredEmployees] = useState([]);
   const [filteredDevices, setFilteredDevices] = useState([]);
   const [roleFilter, setRoleFilter] = useState("");
   const [deviceTypeFilter, setDeviceTypeFilter] = useState("");
+  const [catalogCategoryFilter, setCatalogCategoryFilter] = useState("");
   const [deviceOwnerFilter, setDeviceOwnerFilter] = useState("");
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [deviceSearch, setDeviceSearch] = useState("");
+  const [catalogSearch, setCatalogSearch] = useState("");
   const [employeeForm, setEmployeeForm] = useState(DEFAULT_EMPLOYEE_FORM);
   const [deviceForm, setDeviceForm] = useState(DEFAULT_DEVICE_FORM);
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
@@ -23,6 +30,7 @@ function App() {
   const [errors, setErrors] = useState([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(false);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [dashboardState, setDashboardState] = useState({
     totalEmployees: 0,
     totalDevices: 0,
@@ -73,9 +81,9 @@ function App() {
       setDeviceOwnerFilter(savedOwnerFilter);
     }
 
-    if (hash === "employees" || hash === "devices") {
+    if (hash === "employees" || hash === "devices" || hash === "catalog" || hash === "orders") {
       setActiveTab(hash);
-    } else if (savedTab === "employees" || savedTab === "devices") {
+    } else if (savedTab === "employees" || savedTab === "devices" || savedTab === "catalog" || savedTab === "orders") {
       setActiveTab(savedTab);
     }
   }, []);
@@ -100,6 +108,8 @@ function App() {
   useEffect(() => {
     fetchEmployees();
     fetchDevices();
+    fetchCatalog();
+    fetchOrders();
   }, []);
 
   useEffect(() => {
@@ -226,6 +236,60 @@ function App() {
     });
   }, [employees, devices]);
 
+  const cartLines = useMemo(() => {
+    const lines = [];
+
+    cart.forEach((line) => {
+      const product = catalog.find((product) => product.id === line.productId);
+
+      if (product) {
+        lines.push({
+          productId: line.productId,
+          quantity: line.quantity,
+          name: product.name,
+          price: product.price,
+        });
+      }
+    });
+
+    return lines;
+  }, [cart, catalog]);
+
+  const cartTotal = useMemo(() => {
+    let total = 0;
+    for(const line of cartLines)
+      total += line.quantity * line.price;
+    return total;
+  },[cartLines]);
+
+  const cartCount = useMemo(() => {
+    let count = 0;
+    for(const line of cartLines)
+      count += line.quantity;
+    return count;
+  },[cartLines]);
+
+  function addToCart(productId) {
+    setCart((prev) => {
+      const existing = prev.find((line) => line.productId === productId);
+      if (existing) {
+        return prev.map((line) => line.productId === productId ? { ...line, quantity: line.quantity + 1 } : line);
+      }
+      return [...prev, { productId, quantity: 1 }];
+    });
+  }
+
+  function removeFromCart(productId) {
+    setCart((prev) => prev.filter((line) => line.productId !== productId));
+  }
+
+  function updateCartQuantity(productId, quantity) {
+    if (!Number.isInteger(quantity) || quantity < 1){
+      return;
+    }
+    setCart((prev) => prev.map((line) => line.productId === productId ? { ...line, quantity } : line));
+  }
+
   useEffect(() => {
     if (!statusMessage) {
       return undefined;
@@ -255,6 +319,63 @@ function App() {
     }
   }
 
+
+
+  async function fetchCatalog() {
+    try {
+      const response = await fetch("/api/catalog");
+      const json = await response.json();
+      if (!response.ok){
+        throw new Error(json.message || "Couldn't load catalog");
+      }
+      setCatalog(Array.isArray(json) ? json : [])
+      
+    } catch (error) {
+      setErrors((prev) => [...prev, `Catalog fetch failed: ${error.message}`]);
+    } finally{
+      setLoadingCatalog(false);
+    }
+  }
+
+    async function fetchOrders(){
+      try {
+        setLoadingOrders(true);
+        const response = await fetch("api/orders");
+        const json = await response.json();
+        if (!response.ok)
+          throw new Error(json.message || "Could not load orders");
+        setOrders(Array.isArray(json) ? json : []);
+      } catch (error) {
+        setErrors((prev) => [...prev, `Orders fetch failed : ${error.message}`]);
+      }
+      finally{
+        setLoadingOrders(false);
+      }
+    }
+    async function submitOrder() {
+      if (cart.length === 0)
+        return;
+      setPlacingOrder(true);
+      try {
+          const response = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: cart }),
+        });
+        const json = await response.json();
+        if (!response.ok) {
+          throw new Error(json.message || "Could not create order");
+        }
+        setStatusMessage(`Order #${json.id} created`);
+        setCart([]);
+        await fetchOrders();
+      } catch (error) {
+        setErrors((prev) => [...prev, `Order failed: ${error.message}`]);
+      } finally {
+        setPlacingOrder(false);
+      }
+  }
+
   async function fetchDevices() {
     setLoadingDevices(true);
     try {
@@ -271,6 +392,31 @@ function App() {
       setLoadingDevices(false);
     }
   }
+
+  const catalogCategories = useMemo(
+    () => [...new Set(catalog.map((product) => product.category))],
+    [catalog]
+  );
+
+  const filteredCatalog = useMemo(() => {
+    let result = catalog;
+    if (catalogCategoryFilter) {
+      result = result.filter(
+        (product) => product.category === catalogCategoryFilter
+      );
+    }
+
+    const query = catalogSearch.trim().toLowerCase();
+    if (query) {
+      result = result.filter(
+        (product) =>
+          product.name.toLowerCase().includes(query) ||
+          product.category.toLowerCase().includes(query)
+      );
+    }
+
+    return result;
+  }, [catalog, catalogCategoryFilter, catalogSearch]);
 
   async function submitEmployee(event) {
     event.preventDefault();
@@ -357,6 +503,8 @@ function App() {
       }
       setStatusMessage("Employee deleted");
       await fetchEmployees();
+      await fetchDevices();
+
     } catch (error) {
       setErrors((prev) => [
         ...prev,
@@ -462,10 +610,28 @@ function App() {
           Devices
         </button>
         <button
+          className={
+            activeTab === "catalog" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("catalog")}
+          type="button"
+        >
+          Catalog
+        </button>
+        <button
+          className={activeTab === "orders" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("orders")}
+          type="button"
+        >
+          Orders
+        </button>
+        <button
           type="button"
           onClick={() => {
             fetchEmployees();
             fetchDevices();
+            fetchCatalog();
+            fetchOrders();
           }}
         >
           Manual refresh
@@ -758,9 +924,177 @@ function App() {
             </table>
           </section>
         ) : null}
+      {activeTab === "catalog" ? (
+      <div className="catalog-layout">
+        <section className="panel">
+          <h2>Catalog</h2>
+
+          <h3>Filters</h3>
+          <div className="filters">
+            <label>
+              Category
+              <select
+                value={catalogCategoryFilter}
+                onChange={(event) => setCatalogCategoryFilter(event.target.value)}
+              >
+                <option value="">All</option>
+                {catalogCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Search
+              <input
+                value={catalogSearch}
+                onChange={(event) => setCatalogSearch(event.target.value)}
+                placeholder="Search name / category"
+              />
+            </label>
+          </div>
+
+          <h3>Product list {loadingCatalog ? "(loading...)" : ""}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Description</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCatalog.map((product) => (
+                <tr key={product.id}>
+                  <td>{product.name}</td>
+                  <td>{product.category}</td>
+                  <td>{product.price} €</td>
+                  <td>{product.description}</td>
+                  <td>
+                    <button type="button" onClick={() => addToCart(product.id)}>
+                      Add
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {filteredCatalog.length === 0 ? (
+                <tr>
+                  <td colSpan="5">No products found</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </section>
+
+        <aside className="panel cart">
+          <h2>Cart ({cartCount})</h2>
+          {cartLines.length === 0 ? (
+            <p>Your cart is empty</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Subtotal</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cartLines.map((line) => (
+                  <tr key={line.productId}>
+                    <td>{line.name}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCartQuantity(line.productId, line.quantity - 1)
+                        }
+                        disabled={line.quantity <= 1}
+                      >
+                        -
+                      </button>{" "}
+                      {line.quantity}{" "}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCartQuantity(line.productId, line.quantity + 1)
+                        }
+                      >
+                        +
+                      </button>
+                    </td>
+                    <td>{(line.price * line.quantity).toFixed(2)} €</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => removeFromCart(line.productId)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p>
+            <strong>Total: {cartTotal.toFixed(2)} €</strong>
+          </p>
+          <button
+            type="button"
+            onClick={submitOrder}
+            disabled={cartLines.length === 0 || placingOrder}
+          >
+            {placingOrder ? "Creating order..." : "Create order"}
+          </button>
+        </aside>
+      </div>
+    ) : null}
+    {activeTab === "orders" ? (
+    <section className="panel">
+      <h2>Order history {loadingOrders ? "(loading...)" : ""}</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Date</th>
+            <th>Items</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map((order) => (
+            <tr key={order.id}>
+              <td>#{order.id}</td>
+              <td>{order.created_at}</td>
+              <td>
+                <ul>
+                  {order.items.map((item) => (
+                    <li key={item.product_id}>
+                      {item.quantity} × {item.name} ({item.unit_price} €)
+                    </li>
+                  ))}
+                </ul>
+              </td>
+              <td>{order.total.toFixed(2)} €</td>
+            </tr>
+          ))}
+          {orders.length === 0 ? (
+            <tr>
+              <td colSpan="4">No orders yet</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </section>
+  ) : null}
       </main>
     </div>
   );
-}
+  }
 
-export default App;
+  export default App;
